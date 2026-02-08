@@ -9,10 +9,9 @@
 
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-
 /* ===== SIDEBAR ===== */
 #sidebar{background:#f3f2f7; border-right:1px solid lightgray; min-height:100vh; width:200px; position:fixed; top:0; left:-200px; 
-padding: 0.5rem 1rem; transition:.3s; z-index:1100; box-shadow: rgba(0, 0, 0, 0.15) 1.95px 1.95px 2.6px;}
+padding: 0.5rem 1rem; transition:.3s; z-index:1100; box-shadow: rgba(60, 64, 67, 0.3) 0px 1px 2px 0px, rgba(60, 64, 67, 0.15) 0px 1px 3px 1px;}
 #sidebar.active{left:0;}
 #sidebar button{width:100%;margin-bottom:.5rem;}
 #overlay{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:1000;}
@@ -47,6 +46,7 @@ padding: 0.5rem 1rem; transition:.3s; z-index:1100; box-shadow: rgba(0, 0, 0, 0.
 .day-empty { background:#f1f1f1; }
 .weekend { background:#e0e0e0 !important; }
 .sticky-col {position: sticky; left: 0; background: white; z-index: 2;}
+.holiday {background: #ffe0b2 !important; font-weight: bold;cursor: help;}
 </style>
 </head>
 <body>
@@ -56,6 +56,8 @@ padding: 0.5rem 1rem; transition:.3s; z-index:1100; box-shadow: rgba(0, 0, 0, 0.
   <!-- Mobile Logout Button -->
   <button class="btn btn-outline-primary btn-sm py-2" onclick="showMonthlyAttendance()">Monthly Attendance</button>
   <button class="btn btn-outline-primary btn-sm py-2" onclick="showStuReport()">Student Progress</button>  
+  <button class="btn btn-outline-primary btn-sm py-2" onclick="examMarksEntry()">Enter CT/Qz Marks</button> 
+  <button class="btn btn-outline-primary btn-sm py-2" onclick="adminPage()">Admin Page</button>  
   <button class="btn btn-sm btn-outline-danger py-2 w-100 d-md-none" onclick="logoutTeacher()">Logout</button>
 </div>
 
@@ -176,11 +178,11 @@ padding: 0.5rem 1rem; transition:.3s; z-index:1100; box-shadow: rgba(0, 0, 0, 0.
 </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
 
 <script>
   /* ========== CONFIG ========== */
-const API_URL = "https://script.google.com/macros/s/AKfycbyQieJ5EDXNOySkbrbrYUUxR-Ua9Owhz-G7n4JH1PP5hIPCqzN7IAjQ2VI7pCa0DcF6Mg/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbxQS0Pft0KJaieuskPQpBN3_A2Y5Q6Ebo2q8BynLWokhjnP-LSy7jTxu1UBYTQfbqI/exec";
 
 // ---------------- Session Check ----------------
 const teacherID = sessionStorage.getItem("teacher"); 
@@ -215,8 +217,7 @@ function toggleSidebar() {
 }
 
 document.getElementById("todayDate").value=new Date().toISOString().slice(0,10);
-let studentsData=[];
-let allStudentsData = [];
+let studentData = {};  // key = roll, value = student object
 
 function fetchStudents(){
   if(!cls.value || !sec.value || !sub.value){Swal.fire("Select Class, Section & Subject"); return;}
@@ -230,8 +231,7 @@ function fetchStudents(){
     const day = dateObj.getDate();     
     const month = dateObj.getMonth() + 1;
     
-    fetch(API_URL,{
-      method:"POST",
+    fetch(API_URL,{ method:"POST",
       body:JSON.stringify({action:"getStudents", cls:cls.value, sec:sec.value, sub:sub.value, tid:teacherID, day:day, month: month})})
     .then(r=>r.json())
     .then(res=>{ Swal.close(); studentsList(res);});
@@ -241,77 +241,90 @@ function fetchStudents(){
 function studentsList(res){
   console.log(res);
   if(res.status === "unauthorized"){ hideLoader(); Swal.fire("Sorry, you are not authorized for this subject!"); return;}
-  if(res.status === "ok"  && res.data.length > 0){
-    studentsData = res.data; allStudentsData = [...res.data]; hideLoader(); 
-    renderTable();
-  }
+    if(res.status === "ok" && res.data.length > 0){
+        studentData = {};
+        res.data.forEach(s => studentData[s.roll] = {...s});
+        renderTable(Object.values(studentData));
+    }
 }  
 
-function renderTable(){
-  document.getElementById("mytbody").innerHTML = "";
-  let tblRows = ""; 
-  let present=0;
-  studentsData.forEach((s,i)=>{
-    if(s.status==="P") present++;
-    tblRows +=`
-      <tr class="${s.status !== 'P' ? 'tr-absent' : ''}">
-        <td class="d-none d-md-table-cell">${i+1}</td>
-        <td class="d-none d-md-table-cell">${s.roll}</td>
-        <td><div class="td_name">
-            <div>👤</div>
-            <div class="name_roll"> <div>${s.name}</div> <div class="d-md-none">Roll: ${s.roll}</div></div></div> 
-        </td>
-        <td><span class="badge ${s.lastDay==="P"?"bg-success":"bg-danger"}">${s.lastDay==="P"?"P":"A"}</span></td>
-        <td class="d-none d-md-table-cell">
-            <span class="badge ${s.status==="P"?"bg-success":"bg-danger"}"> ${s.status==="P"?"Present":"Absent"}</span>
-        </td>
-        <td class="action"><button class="attn-btn ${s.status==="P"?"p":"a"}" onclick="toggleAttendance(${i})"> ${s.status==="P"?"P":"A"}</button></td>
-        <td class="d-none d-md-table-cell">${s.rate} %</td>
-      </tr>`;
-  });
+function renderTable(studentsArray){
+    const tbody = document.getElementById("mytbody");
+    tbody.innerHTML = "";
+    let present = 0;
 
-  document.getElementById("mytbody").innerHTML = tblRows;
-  document.getElementById('totalStu').textContent = studentsData.length;
-  document.getElementById('presentStu').textContent = present;
-  document.getElementById('absentStu').textContent = studentsData.length - present;
-  updateMarkAllCheckbox();
+    studentsArray.forEach((s, i) => {
+        if(s.status === "P") present++;
+
+        tbody.innerHTML += `
+        <tr class="${s.status !== "P" ? "tr-absent" : ""}">
+            <td class="d-none d-md-table-cell">${i+1}</td>
+            <td class="d-none d-md-table-cell">${s.roll}</td>
+            <td class="td_name">
+                <div>👤</div>
+                <div class="name_roll">
+                    <div>${s.name}</div>
+                    <div class="d-md-none">Roll: ${s.roll}</div>
+                </div>
+            </td>
+            <td><span class="badge ${s.lastDay==="P"?"bg-success":"bg-danger"}">${s.lastDay==="P"?"P":"A"}</span></td>
+            <td class="d-none d-md-table-cell">
+                <span class="badge ${s.status==="P"?"bg-success":"bg-danger"}">${s.status==="P"?"Present":"Absent"}</span>
+            </td>
+            <td class="action">
+                <button class="attn-btn ${s.status==="P"?"p":"a"}" onclick="toggleAttendance('${s.roll}')">${s.status==="P"?"P":"A"}</button>
+            </td>
+            <td class="d-none d-md-table-cell">${s.rate} %</td>
+        </tr>`;
+    });
+    document.getElementById('totalStu').textContent = studentsArray.length;
+    document.getElementById('presentStu').textContent = present;
+    document.getElementById('absentStu').textContent = studentsArray.length - present;
+    updateMarkAllCheckbox();
 }
 
-function toggleAttendance(i){studentsData[i].status=studentsData[i].status==="P"?"":"P"; renderTable();}
+function toggleAttendance(roll){if(studentData[roll]){ studentData[roll].status = studentData[roll].status === "P" ? "" : "P"; renderTable(Object.values(studentData));}}
+function showAbsentOnly(){const absentStudents = Object.values(studentData).filter(s => s.status !== "P"); renderTable(absentStudents);}
+function showAllStudents(){renderTable(Object.values(studentData));}
 
-function showAbsentOnly(){
-  const absentCount = studentsData.filter(s => s.status !== "P").length;
-  if(absentCount === 0) return;
-  studentsData = allStudentsData.filter(s => s.status !== "P");
-  renderTable();
+
+/* ================= HOLIDAY ================= */
+const holidayData = {};
+
+function fetchGovHolidays(year) {
+  if (holidayData[year]) {return Promise.resolve(holidayData[year]); }
+  console.log("I m called");
+  return fetch(API_URL, {method: "POST", body: JSON.stringify({ action: "adminGetHolidays", year: year })})
+  .then(res => res.json())
+  .then(res => {if (res.status === "ok") {console.log(res); holidayData[year] = res.data || []; return holidayData[year]; } holidayData[year] = []; return [];});
 }
 
-function showAllStudents(){ studentsData = [...allStudentsData]; renderTable();}
+function getHolidayInfo(year, month, day) {
+  const list = holidayData[year];
+  if (!list) return null;
+  const d = `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+  return list.find(h => h.date === d) || null;
+}
+function isGovHoliday(year, month, day) {return !!getHolidayInfo(year, month, day);}
 
-function showMonthlyAttendance(){
-  document.getElementById("atnInfoContainer").style.display = "none"; 
-  document.getElementById("tableContainer").style.display = "none"; 
+function showMonthlyAttendance() {
+  document.getElementById("atnInfoContainer").style.display = "none";
+  document.getElementById("tableContainer").style.display = "none";
   document.getElementById("monthlyContainer").style.display = "block";
   const inputDate = document.getElementById('todayDate').value;
   const dateObj = new Date(inputDate);
   currentMonth = dateObj.getMonth() + 1;
   currentYear  = dateObj.getFullYear();
-  loadMonthlyAttendance();
+  showLoader();
+  fetchGovHolidays(currentYear) .then(() => {console.log(holidayData); loadMonthlyAttendance();}); //.then () দিয়ে wait করতে বলা হয়েছে, response না আসা পর্যন্ত wait করবে। 
 }
 
-
 function loadMonthlyAttendance(){
-  showLoader();
-  fetch(API_URL,{
-    method:"POST",
-    body:JSON.stringify({action:"monthlyAttendance", cls:cls.value, sec:sec.value, sub:sub.value, month:currentMonth, year:currentYear})})
+  fetch(API_URL,{ method:"POST", body:JSON.stringify({action:"monthlyAttendance", cls:cls.value, sec:sec.value, sub:sub.value, month:currentMonth, year:currentYear})})
   .then(r=>r.json())
   .then(res=> {
-  if(res.status === "ok" && res.data.length > 0){
-          renderMonthlyTable(res.data);
-      } else {
-          hideLoader();
-          Swal.fire("No attendance data found for this month");
+  if(res.status === "ok" && res.data.length > 0){ renderMonthlyTable(res.data);
+      } else {hideLoader(); Swal.fire("No attendance data found for this month");
           document.getElementById("monthlyHead").innerHTML = "";
           document.getElementById("monthlyBody").innerHTML = "";
       }
@@ -322,32 +335,50 @@ function renderMonthlyTable(data){
   hideLoader();
   const head = document.getElementById("monthlyHead");
   const body = document.getElementById("monthlyBody");
-  head.innerHTML = body.innerHTML = "";
+  head.innerHTML = "";
+  body.innerHTML = "";
+
   const days = data[0].days.length;
-  const monthName = new Date(currentYear, currentMonth - 1, 1).toLocaleString('default',{month:'long'});
-  document.getElementById("monthTitle").innerText =`${monthName} ${currentYear}`;
+  const monthName = new Date(currentYear, currentMonth - 1, 1)
+    .toLocaleString('default',{month:'long'});
 
-  // HEADER
-  let h = `<tr>
-    <th class="sticky-col">Roll</th>
-    <th class="sticky-col">Name</th>`;
-  for(let d=1; d<=days; d++){
-    const wd = new Date(currentYear, currentMonth - 1, d).getDay();
-    h += `<th class="${wd==0||wd==6?'weekend':''}">${d}</th>`;
+  document.getElementById("monthTitle").innerText =
+    `${monthName} ${currentYear}`;
+
+/* ===== HEADER ===== */
+let headerHTML = `<tr>
+  <th class="sticky-col">Roll</th> <th class="sticky-col">Name</th>`;
+
+for(let d=1; d<=days; d++){
+  const wd = new Date(currentYear, currentMonth-1, d).getDay();
+  let cls = "";
+  let title = "";
+  if(wd === 5 || wd === 6) cls += " weekend";
+  const holiday = getHolidayInfo(currentYear, currentMonth, d);
+  if(holiday){cls += " holiday"; title = holiday.holiday_name;
   }
-  h += `<th>P</th><th>A</th></tr>`;
-  head.innerHTML = h;
+  headerHTML += `<th class="${cls}" title="${title}">${d}</th>`;
+}
 
-  // BODY
+headerHTML += `<th>P</th><th>A</th></tr>`;
+head.innerHTML = headerHTML;
+
+  /* ===== BODY ===== */
   data.forEach(stu=>{
     let r = `<tr>
       <td class="sticky-col">${stu.roll}</td>
       <td class="sticky-col">${stu.name}</td>`;
+
     stu.days.forEach((d,i)=>{
-      const wd = new Date(currentYear, currentMonth - 1, i+1).getDay();
-      let cls = d==="P"?"day-P":(d===""?"day-empty":"day-A");
-      if(wd==0||wd==6) cls += " weekend";
-      r += `<td class="${cls}">${d}</td>`;
+      const dayNo = i + 1;
+      const wd = new Date(currentYear, currentMonth-1, dayNo).getDay();
+      let cls = d==="P" ? "day-P" : (d==="" ? "day-empty" : "day-A");
+      let title = "";
+      if(wd === 5 || wd === 6) cls += " weekend";
+
+      const h = getHolidayInfo(currentYear, currentMonth, dayNo);
+      if(h){cls += " holiday";  title = h.holiday_name; }
+      r += `<td class="${cls}" title="${title}">${d}</td>`;
     });
     r += `<td>${stu.present}</td><td>${stu.absent}</td></tr>`;
     body.innerHTML += r;
@@ -361,155 +392,101 @@ function backToDaily(){
 }
 
 function downloadMonthlyExcel(){
-
-  if(!cls.value || !sec.value || !sub.value){
-    Swal.fire("Class, Section & Subject required");
-    return;
-  }
-
+  if(!cls.value || !sec.value || !sub.value){ Swal.fire("Class, Section & Subject required"); return;}
   showLoader("Preparing Excel...");
 
-  fetch(API_URL,{
-    method:"POST",
-    body:JSON.stringify({
-      action: "monthlyAttendance",
-      cls: cls.value,
-      sec: sec.value,
-      sub: sub.value,
-      month: currentMonth,
-      year: currentYear
-    })
-  })
-  .then(r => r.json())
-  .then(res => { console.log(res);
-    hideLoader();
-
-    if(res.status !== "ok" || !res.data.length){
-      Swal.fire("No data found");
-      return;
-    }
-
+  fetch(API_URL,{method:"POST",
+    body:JSON.stringify({action: "monthlyAttendance", cls: cls.value, sec: sec.value, sub: sub.value, month: currentMonth, year: currentYear})
+  }).then(r => r.json())
+  .then(res => { console.log(res); hideLoader();
+    if(res.status !== "ok" || !res.data.length){ Swal.fire("No data found"); return;}
     generateExcel(res.data);
-  })
-  .catch(err=>{
-    hideLoader();
-    Swal.fire("Failed to fetch data");
-    console.error(err);
-  });
+  }).catch(err=>{hideLoader(); Swal.fire("Failed to fetch data"); console.error(err);});
+}
+
+function getHolidayForExcel(year, month, day){
+  const list = holidayData[year];
+  if (!list) return null;
+  const d = `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+  return list.find(h => h.date === d) || null;
 }
 
 function generateExcel(data){
-
-  const wb = XLSX.utils.book_new();
-  const ws = {};
-  let row = 0;
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet("Monthly Attendance");
 
   const days = data[0].days.length;
-  const monthName = new Date(currentYear, currentMonth-1, 1)
-    .toLocaleString("default",{month:"long"});
+  const monthName = new Date(currentYear, currentMonth-1, 1).toLocaleString("default",{month:"long"});
 
   const header = ["Roll","Name"];
-  for(let d=1; d<=days; d++) header.push(d);
-  header.push("Total P","% P");
-
-  const totalCols = header.length;
-
-  /* ========= helpers ========= */
-  const C = (r,c)=>XLSX.utils.encode_cell({r,c});
-  const range = (r1,c1,r2,c2)=>({s:{r:r1,c:c1},e:{r:r2,c:c2}});
+  for(let d=1; d<=days; d++) header.push(d); header.push("Total P","% P");
 
   /* ========= Institute ========= */
-  ws[C(row,0)] = {
-    v:"Pirganj Govt. Technical School and College, Pirganj, Thakurgaon",
-    s:{font:{sz:12},alignment:{horizontal:"center"}}
-  };
-  ws["!merges"] = [ range(row,0,row,totalCols-1) ];
+  let row = 1;
+  ws.mergeCells(row,1,row,header.length);
+  ws.getCell(row,1).value = "Pirganj Govt. Technical School and College, Pirganj, Thakurgaon";
+  ws.getCell(row,1).alignment = {horizontal:"center"};
+  ws.getCell(row,1).font = {size:12};
   row++;
 
   /* ========= Title ========= */
-  ws[C(row,0)] = {
-    v:"Monthly Attendance",
-    s:{font:{sz:12},alignment:{horizontal:"center"}}
-  };
-  ws["!merges"].push(range(row,0,row,totalCols-1));
+  ws.mergeCells(row,1,row,header.length);
+  ws.getCell(row,1).value = "Monthly Attendance";
+  ws.getCell(row,1).alignment = {horizontal:"center"};
+  ws.getCell(row,1).font = {size:12};
   row++;
 
   /* ========= Month ========= */
-  ws[C(row,0)] = {
-    v:`${monthName}, ${currentYear}`,
-    s:{font:{bold:true,sz:12},alignment:{horizontal:"center"}}
-  };
-  ws["!merges"].push(range(row,0,row,totalCols-1));
+  ws.mergeCells(row,1,row,header.length);
+  ws.getCell(row,1).value = `${monthName}, ${currentYear}`;
+  ws.getCell(row,1).alignment = {horizontal:"center"};
+  ws.getCell(row,1).font = {bold:true,size:12};
   row++;
 
   /* ========= Class Info ========= */
-  ws[C(row,0)] = {v:`Class: ${cls.value}`};
-  ws[C(row,2)] = {v:`Section: ${sec.value}`};
-  ws[C(row,11)] = {v:`Subject: ${sub.value}`};
-  ws[C(row,23)] = {v:`Teacher:`};
-
-  ws["!merges"].push(
-    range(row,0,row,1),
-    range(row,2,row,10),
-    range(row,11,row,22),
-    range(row,23,row,totalCols-1)
-  );
+  ws.mergeCells(row,1,row,2); ws.getCell(row,1).value = `Class: ${cls.value}`;
+  ws.mergeCells(row,3,row,11); ws.getCell(row,3).value = `Section: ${sec.value}`; 
+  ws.mergeCells(row,12,row,23); ws.getCell(row,12).value = `Subject: ${sub.value}`; 
+  ws.mergeCells(row,24,row,header.length); ws.getCell(row,24).value = `Teacher:`;
   row++;
 
   /* ========= Table Header ========= */
-  header.forEach((h,c)=>{
-    ws[C(row,c)] = {
-      v:h,
-      s:{
-        font:{bold:true},
-        alignment:{horizontal:"center"},
-        border:{
-          top:{style:"thin"},
-          bottom:{style:"thin"},
-          left:{style:"thin"},
-          right:{style:"thin"}
-        }
-      }
-    };
+  const headerRow = ws.addRow(header);
+  headerRow.eachCell((cell, colNumber) => {
+    cell.font = {bold:true}; cell.alignment = {horizontal:"center"};
+    cell.border = {top:{style:"thin"}, bottom:{style:"thin"}, left:{style:"thin"}, right:{style:"thin"}};
 
-    // weekend header shade
-    if(c>=2 && c<2+days){
-      const d = c-1;
-      const wd = new Date(currentYear,currentMonth-1,d).getDay();
-      if(wd===5 || wd===6){
-        ws[C(row,c)].s.fill = {fgColor:{rgb:"CCCCCC"}};
-      }
+    if(colNumber >= 3 && colNumber < 3 + days){
+      const d = colNumber - 2;
+      const wd = new Date(currentYear, currentMonth - 1, d).getDay();
+      const hday = getHolidayForExcel(currentYear, currentMonth, d);
+      if(wd === 5 || wd === 6){cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:"CCCCCC"}};}
+      if(hday){cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:"FFE0B2"}};}
     }
   });
   row++;
 
   /* ========= Table Body ========= */
-  data.forEach(stu=>{
+  data.forEach(stu => {
     const total = stu.present + stu.absent;
     const pct = total ? Math.round((stu.present/total)*100) : 0;
-
     const r = [stu.roll,stu.name,...stu.days,stu.present,pct];
+    const excelRow = ws.addRow(r);
 
-    r.forEach((val,c)=>{
-      ws[C(row,c)] = {
-        v:val,
-        s:{
-          alignment:{horizontal:"center"},
-          border:{
-            top:{style:"thin"},
-            bottom:{style:"thin"},
-            left:{style:"thin"},
-            right:{style:"thin"}
-          }
-        }
+    excelRow.eachCell((cell, colNumber) => {
+      cell.alignment = {horizontal:"center"};
+      cell.border = {
+        top:{style:"thin"}, bottom:{style:"thin"}, left:{style:"thin"}, right:{style:"thin"}
       };
-
-      // weekend body shade
-      if(c>=2 && c<2+days){
-        const d = c-1;
-        const wd = new Date(currentYear,currentMonth-1,d).getDay();
-        if(wd===5 || wd===6){
-          ws[C(row,c)].s.fill = {fgColor:{rgb:"E0E0E0"}};
+      if(colNumber >= 3 && colNumber < 3 + days){
+        const d = colNumber - 2;
+        const wd = new Date(currentYear, currentMonth - 1, d).getDay();
+        const hday = getHolidayForExcel(currentYear, currentMonth, d);
+        if(wd === 5 || wd === 6){
+          cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:"E0E0E0"}};
+        }
+        if(hday){
+          cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:"FFE0B2"}};
         }
       }
     });
@@ -517,85 +494,88 @@ function generateExcel(data){
   });
 
   /* ========= Signature ========= */
-  row+=2;
-  ws[C(row,0)]={v:"Class Teacher"};
-  ws["!merges"].push(range(row,0,row,9));
-  row++;
-  ws[C(row,0)]={v:"Signature: __________________"};
-  ws["!merges"].push(range(row,0,row,9));
+  row += 2;
+  ws.mergeCells(row,1,row,6);
+  ws.getCell(row,1).value = "Class Teacher signature";
+
+  /* ========= HOLIDAY NOTES ========= */
+  const noteCol = 10;  // signature এর ডানদিকে
+  ws.getCell(row,noteCol).value = "Govt. Holidays";
+  ws.getCell(row,noteCol).font = {bold:true};
+  let noteRow = row+1;
+  for(let d=1; d<=days; d++){
+    const h = getHolidayForExcel(currentYear, currentMonth, d);
+    if(h){
+      ws.getCell(noteRow,noteCol).value = `${String(d).padStart(2,"0")}-${String(currentMonth).padStart(2,"0")}-${currentYear} : ${h.holiday_name}`;
+      noteRow++;
+    }
+  }
 
   /* ========= Column Width ========= */
-  ws["!cols"] = [
-    {wpx:60},{wpx:150},
-    ...Array(days).fill({wpx:25}),
-    {wpx:50},{wpx:50}
-  ];
+  const cols = [{width:8},{width:20}, ...Array(days).fill({width:5}), {width:8},{width:5}];
+  cols.push({width:50}); // holiday note
+  ws.columns = cols;
 
-  ws["!ref"] = XLSX.utils.encode_range({
-    s:{r:0,c:0},
-    e:{r:row,c:totalCols-1}
+  /* ========= Save File ========= */
+  workbook.xlsx.writeBuffer().then(buffer => {
+    const blob = new Blob([buffer], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `Monthly_Attendance_Class_${cls.value}${sec.value}_${sub.value}_${monthName}_${currentYear}.xlsx`;
+    link.click();
   });
-
-  XLSX.utils.book_append_sheet(wb,ws,"Monthly Attendance");
-
-  XLSX.writeFile(
-    wb,
-    `Monthly_Attendance_Class_${cls.value}${sec.value}_${sub.value}_${monthName}_${currentYear}.xlsx`
-  );
 }
 
-
-
-
-
-function changeMonth(step){ currentMonth += step;
-  if(currentMonth < 1){ currentMonth = 12; currentYear--;}
-  if(currentMonth > 12){ currentMonth = 1; currentYear++;}
-  loadMonthlyAttendance();
+function changeMonth(step) {
+  currentMonth += step;
+  if (currentMonth < 1) {currentMonth = 12; currentYear--;}
+  if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+  showLoader();
+  fetchGovHolidays(currentYear).then(() => {loadMonthlyAttendance();}); //.then () দিয়ে wait করতে বলা হয়েছে, response না আসা পর্যন্ত wait করবে। 
 }
 
 function submitAttendance(){
-  Swal.fire({title: 'Are you sure?', icon: 'warning', showCancelButton: true, confirmButtonText: 'Yes', cancelButtonText: 'No'
-  }).then((result) => { 
-    if (result.isConfirmed) {const inputDate = document.getElementById('todayDate').value;
-      if(!inputDate){ alert("Please select date"); return;}
+    Swal.fire({title: 'Are you sure?', icon: 'warning', showCancelButton: true, confirmButtonText: 'Yes', cancelButtonText: 'No'})
+    .then((result) => { 
+        if(result.isConfirmed){
+            const inputDate = document.getElementById('todayDate').value;
+            if(!inputDate){ alert("Please select date"); return; }
+            const dateObj = new Date(inputDate);
+            const day = dateObj.getDate();     
+            const month = dateObj.getMonth() + 1;
+            const rolls = [], attendance = [];
+            Object.values(studentData).forEach(s => {rolls.push(s.roll); attendance.push(s.status==="P" ? "P" : "");});
+            showLoader();
+            fetch(API_URL,{ method:"POST",
+                body:JSON.stringify({action:"saveAttendance", cls: cls.value, sec: sec.value, sub: sub.value, day, month, rolls, attendance})
+            }).then(r=>r.json())
+            .then(res=>{ hideLoader();
+                if(res.status === "ok"){
+                    Swal.fire({ position: "top", icon: "success", title: "ডাটা সফলভাবে সেভ হয়েছে", showConfirmButton: false,  timer: 1500});
+                }
+            });
+        }
+    });
+}
 
-      const dateObj = new Date(inputDate);
-      const day = dateObj.getDate();     
-      const month = dateObj.getMonth() + 1;
-
-      let attendanceArray = studentsData.map(s => s.status === "P" ? "P" : "");
-      let rollArray = studentsData.map(s => s.roll);
-
-      const dataToSend = {cls: cls.value, sec: sec.value, sub: sub.value, day: day, month: month, rolls: rollArray, attendance: attendanceArray};
-      showLoader();
-
-      fetch(API_URL,{
-        method:"POST",
-        body:JSON.stringify({action:"saveAttendance", cls: cls.value, sec: sec.value, sub: sub.value, day: day, month: month, rolls: rollArray, attendance: attendanceArray})})
-      .then(r=>r.json())
-      .then(res=>{
-        if(res.status === "ok"){
-            hideLoader(); Swal.fire({position: "top", icon: "success", title: "ডাটা সফলভাবে সেভ হয়েছে", showConfirmButton: false,timer: 1500});
-        }   
-      });
-    }
-  })
+function examMarksEntry(){
+  location.href = "marks_entry.html";
 }
 
 document.getElementById("markAllPresent").addEventListener("change", function () {
-  const isChecked = this.checked;
-  studentsData.forEach(s => { s.status = isChecked ? "P" : "";});
-  allStudentsData.forEach(s => { s.status = isChecked ? "P" : "";});
-  renderTable();
+    const checked = this.checked;
+    Object.values(studentData).forEach(s => s.status = checked ? "P" : "");
+    renderTable(Object.values(studentData));
 });
 
 function updateMarkAllCheckbox() {
-  const chk = document.getElementById("markAllPresent");
-  if (!studentsData.length) {chk.checked = false; return;}
-  const allPresent = studentsData.every(s => s.status === "P");
-  chk.checked = allPresent;
+    const chk = document.getElementById("markAllPresent");
+    const students = Object.values(studentData);
+    if(!students.length) { chk.checked = false; return; }
+    const allPresent = students.every(s => s.status === "P");
+    chk.checked = allPresent;
 }
+
 
 function showLoader(text = "Processing...") {
   Swal.fire({ title: text, allowOutsideClick: false, didOpen: () => {Swal.showLoading();}});
@@ -612,8 +592,9 @@ function showStuReport(){
   sessionStorage.setItem("sub", sub.value);
   if(sessionStorage.getItem("sub")){location.href = "report.html";}
   }
+
   function logoutTeacher(){location.href="index.html"; }
+  function adminPage(){if(teacherID == "Admin ID"){location.href = "admin.html";}}
 </script>
 </body>
 </html>
-
