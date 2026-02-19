@@ -70,8 +70,10 @@ function afterLoginSuccess(res, tid) {
   sessionStorage.setItem("assignments", JSON.stringify(res.assignments || []));
   sessionStorage.setItem("holidays", JSON.stringify(holidayData || {}));
 
-  location.href = "attendance.html";
+  location.href = API_URL + "?page=attendance&token=" + res.token;
+
 }
 </script>
 </body>
 </html>
+
